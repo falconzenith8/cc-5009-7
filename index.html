@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>地形材质融合预览 · Terrain Material Fusion</title>
+  <link rel="stylesheet" href="/src/app/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <span class="brand-title">地形材质融合预览</span>
+      <span class="brand-sub">Terrain Material Fusion Preview</span>
+    </div>
+    <div class="topbar-actions">
+      <label class="inline-field">
+        <span>视图</span>
+        <select id="debug-mode-select" aria-label="调试视图"></select>
+      </label>
+      <button id="btn-pause" class="btn" type="button">暂停漫游</button>
+      <button id="btn-reset-view" class="btn" type="button">重置相机</button>
+      <button id="btn-save" class="btn" type="button">保存参数</button>
+      <button id="btn-load" class="btn" type="button">载入参数</button>
+      <input id="file-input" type="file" accept="application/json,.json" hidden />
+      <button id="btn-baseline" class="btn btn-ghost" type="button">导出截图</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <aside class="panel panel-controls" aria-label="地形融合参数">
+      <div class="panel-head">
+        <h2>地形融合内核控件</h2>
+        <p class="hint">所有控件由内核 schema 生成；非法输入会被内核修正并在此反馈。</p>
+      </div>
+      <div id="presets" class="presets"></div>
+      <div id="warnings" class="warnings" role="alert" aria-live="polite"></div>
+      <div id="control-groups" class="control-groups"></div>
+      <div class="panel-foot">
+        <div class="io-row">
+          <button id="btn-copy-state" class="btn btn-small" type="button">复制参数 JSON</button>
+          <button id="btn-paste-state" class="btn btn-small" type="button">从剪贴板载入</button>
+        </div>
+        <p class="hint" id="persist-note">参数自动保存到 localStorage（v3），也可导出 JSON 文件。</p>
+      </div>
+    </aside>
+
+    <section class="viewport-wrap" aria-label="地形渲染窗口">
+      <canvas id="viewport" tabindex="0" aria-label="地形实时渲染画布"></canvas>
+      <div id="error-overlay" class="error-overlay" hidden></div>
+      <div class="viewport-hud">
+        <div class="hud-block">
+          <span class="hud-label">网格 Mesh</span>
+          <span id="hud-mesh" class="hud-value">–</span>
+        </div>
+        <div class="hud-block">
+          <span class="hud-label">纹理 Textures (GPU)</span>
+          <span id="hud-textures" class="hud-value">–</span>
+        </div>
+        <div class="hud-block">
+          <span class="hud-label">帧率 / 绘制调用</span>
+          <span id="hud-fps" class="hud-value">–</span>
+        </div>
+        <div class="hud-block">
+          <span class="hud-label">当前映射</span>
+          <span id="hud-mapping" class="hud-value">–</span>
+        </div>
+      </div>
+      <div class="viewport-help">
+        <span>拖拽 = 旋转</span><span>Shift/右键拖拽 = 平移</span><span>滚轮 = 缩放</span><span>单击地表 = 探测权重</span>
+      </div>
+    </section>
+
+    <aside class="panel panel-inspector" aria-label="材质融合结果与权重">
+      <div class="panel-head">
+        <h2>结果与权重检查</h2>
+        <p class="hint">探针位置由单击地表设定；表格显示该点的原始权重、归一化权重与最终材质参数。</p>
+      </div>
+
+      <div class="probe-readout">
+        <div class="probe-line"><span>位置</span><span id="probe-uv" class="mono">u 0.50 · v 0.50</span></div>
+        <div class="probe-line"><span>海拔</span><span id="probe-height" class="mono">–</span></div>
+        <div class="probe-line"><span>坡度</span><span id="probe-slope" class="mono">–</span></div>
+        <div class="probe-line"><span>归一化状态</span><span id="probe-norm" class="mono">–</span></div>
+      </div>
+
+      <div class="weight-table-wrap">
+        <table class="weight-table" aria-label="材质权重">
+          <thead>
+            <tr>
+              <th>材质</th>
+              <th>原始</th>
+              <th>归一化</th>
+              <th>色块</th>
+            </tr>
+          </thead>
+          <tbody id="weight-rows"></tbody>
+        </table>
+      </div>
+
+      <div class="result-summary">
+        <div class="summary-row">
+          <span>线性反照率 Linear albedo</span>
+          <span id="sum-albedo" class="mono">–</span>
+        </div>
+        <div class="summary-row">
+          <span>粗糙度 Roughness</span>
+          <span id="sum-roughness" class="mono">–</span>
+        </div>
+        <div class="summary-row">
+          <span>世界法线 World normal</span>
+          <span id="sum-normal" class="mono">–</span>
+        </div>
+        <div class="summary-row">
+          <span>回退材质 Fallback</span>
+          <span id="sum-fallback" class="mono">–</span>
+        </div>
+      </div>
+
+      <div class="swatch-strip" aria-hidden="true">
+        <div class="swatch-main" id="swatch-main"></div>
+        <div class="swatch-caption">预览色块由最终线性反照率编码为 sRGB 显示（非渲染替代）</div>
+      </div>
+
+      <div class="memory-block">
+        <h3>实际内存占用</h3>
+        <table class="mem-table" aria-label="内存占用">
+          <tbody id="memory-rows"></tbody>
+        </table>
+        <p class="hint" id="memory-note">统计来自真实上传的 GL 资源与 CPU 数组，非估算。</p>
+      </div>
+
+      <div class="debug-notes">
+        <h3>映射与接缝</h3>
+        <p id="mapping-note" class="hint"></p>
+      </div>
+    </aside>
+  </main>
+
+  <footer class="statusbar">
+    <span id="status-text">初始化…</span>
+    <span class="spacer"></span>
+    <span id="status-build">–</span>
+  </footer>
+
+  <script type="module" src="/src/app/main.js"></script>
+</body>
+</html>

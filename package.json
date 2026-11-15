@@ -1,0 +1,18 @@
+{
+  "name": "terrain-fusion-preview",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Terrain material-fusion preview: procedural height field, slope/altitude/manual weights, triplanar WebGL2 rendering.",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test tests/unit/*.test.js",
+    "test:e2e": "node tests/e2e/run-e2e.mjs",
+    "baselines": "node tests/e2e/run-e2e.mjs --update-baselines",
+    "check": "node --check server.js && node --test tests/unit/*.test.js"
+  },
+  "dependencies": {
+    "playwright": "^1.65.1",
+    "pngjs": "^7.0.0"
+  }
+}
