@@ -3,9 +3,11 @@
 
 import { createProgram, createBuffer, createTexture2D, createVAO, mat4Perspective, mat4LookAt, mat4Multiply, mat4Identity } from "./gl.js";
 import { VERTEX_SRC, FRAGMENT_SRC, SKY_VERTEX_SRC, SKY_FRAGMENT_SRC, LINE_VERTEX_SRC, LINE_FRAGMENT_SRC } from "./shaders.js";
-import { generateMaterialTextures, mipChainBytes } from "../kernel/textures.js";
+import { generateMaterialTextures, mipChainBytes, declaredTextureFormats } from "../kernel/textures.js";
 import { liftCameraAboveTerrain, terrainFocusHeight } from "../kernel/terrain.js";
 import { MATERIAL_IDS, MATERIAL_BY_ID } from "../kernel/materials.js";
+import { DEFAULT_MATERIAL_PACK_V2 } from "../kernel/materialPack.js";
+import { glslFusionContract } from "./shaders.js";
 import { srgbToLinear } from "../kernel/math.js";
 
 const DEBUG_MODE_INDEX = {
@@ -19,6 +21,7 @@ const DEBUG_MODE_INDEX = {
   slope: 7,
   altitude: 8,
   chunks: 9,
+  vertexFlag: 10,
 };
 
 export class TerrainRenderer {
@@ -76,20 +79,25 @@ export class TerrainRenderer {
     const generated = MATERIAL_IDS.map((id) => generateMaterialTextures(id, textureSize, 1337));
     const tex = {};
     for (const g of generated) {
+      // Internal formats come from the v2 pack declarations, never assumed.
+      const formats = declaredTextureFormats(g.materialId);
+      const albedoFormat = formats.albedoRoughness === "SRGB8_ALPHA8" ? gl.SRGB8_ALPHA8 : gl.RGBA8;
       const albedo = createTexture2D(gl, {
         width: g.size,
         height: g.size,
-        internalFormat: gl.SRGB8_ALPHA8,
+        internalFormat: albedoFormat,
         data: g.albedoRough,
         mipmap: true,
         anisotropy: this.maxAniso,
       });
-  // Albedo textures use SRGB8_ALPHA8: RGB is decoded to linear on sampling
-  // (matching composeAlbedoLinear in the kernel), while alpha keeps linear
-  // roughness. Normal maps must stay linear RGBA8.
+  // Albedo textures use the declared SRGB8_ALPHA8: RGB is decoded to linear on
+  // sampling (matching composeAlbedoLinear in the kernel), while alpha keeps
+  // linear roughness. Normal maps stay linear RGBA8 per their declaration.
+      if (formats.normal !== "RGBA8") throw new Error(`unexpected normal format ${formats.normal}`);
       const normal = createTexture2D(gl, {
         width: g.size,
         height: g.size,
+        internalFormat: gl.RGBA8,
         data: g.normalMap,
         mipmap: true,
         anisotropy: this.maxAniso,
@@ -232,6 +240,9 @@ export class TerrainRenderer {
     gl.uniform3fv(u.uManual, [state.rules.manual.rock, state.rules.manual.soil, state.rules.manual.vegetation]);
     const zp = state.rules.zeroWeightPatch;
     gl.uniform4f(u.uZeroPatch, zp.enabled ? 1 : 0, zp.u, zp.v, zp.radius);
+    // Upload the declared v2 fusion contract; the shader holds no literals.
+    const fusion = glslFusionContract(DEFAULT_MATERIAL_PACK_V2.contract);
+    gl.uniform4fv(u.uFusionCoeffs, new Float32Array(fusion.coeffs.flat()));
     gl.uniform1i(u.uMapMode, state.mapping.mode);
     gl.uniform1f(u.uTileScale, 1 / state.mapping.metersPerTile);
     gl.uniform1f(u.uSharpness, state.mapping.sharpness);

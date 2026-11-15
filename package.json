@@ -9,6 +9,7 @@
     "test": "node --test tests/unit/*.test.js",
     "test:e2e": "node tests/e2e/run-e2e.mjs",
     "baselines": "node tests/e2e/run-e2e.mjs --update-baselines",
+    "migrate": "node tools/migration/migrate-material-asset.mjs",
     "check": "node --check server.js && node --test tests/unit/*.test.js"
   },
   "dependencies": {

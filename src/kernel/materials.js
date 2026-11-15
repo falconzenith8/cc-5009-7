@@ -1,42 +1,31 @@
-// Material palette for the fusion kernel. Colors are authored in sRGB and
-// converted to linear at load. `normalScale` is the strength of the authored
-// tangent-space detail normal; `roughness` is the base perceptual roughness.
+// Material palette facade.
+//
+// The authoritative definitions live in the explicitly declared v2 asset pack
+// (materialPack.js): color space, channel semantics, fusion contract and weight
+// normalization are all declared there. This module keeps the historical
+// import surface stable for the kernel, renderer and UI while resolving every
+// value through the pack, so there is no second, undeclared source of material
+// data to drift out of sync.
+
+import { DEFAULT_MATERIAL_PACK_V2 } from "./materialPack.js";
 import { srgbToLinear } from "./math.js";
 
-export const MATERIAL_IDS = ["rock", "soil", "vegetation"];
+export const MATERIAL_IDS = DEFAULT_MATERIAL_PACK_V2.materialOrder;
 
-export const MATERIALS = [
-  {
-    id: "rock",
-    label: "岩石 Rock",
-    swatch: "#7d7469",
-    albedo: [0.48, 0.45, 0.41],
-    roughness: 0.84,
-    normalScale: 1.15,
-    metallic: 0.0,
-    detailScale: 1.0,
-  },
-  {
-    id: "soil",
-    label: "土壤 Soil",
-    swatch: "#7a5636",
-    albedo: [0.44, 0.31, 0.20],
-    roughness: 0.96,
-    normalScale: 0.7,
-    metallic: 0.0,
-    detailScale: 1.35,
-  },
-  {
-    id: "vegetation",
-    label: "植被 Vegetation",
-    swatch: "#5c7134",
-    albedo: [0.29, 0.40, 0.17],
-    roughness: 0.9,
-    normalScale: 1.6,
-    metallic: 0.0,
-    detailScale: 0.78,
-  },
-];
+export const MATERIALS = DEFAULT_MATERIAL_PACK_V2.materialOrder.map((id) => {
+  const m = DEFAULT_MATERIAL_PACK_V2.materials[id];
+  return {
+    id,
+    label: m.label,
+    swatch: m.swatch,
+    // Historical field name; the pack explicitly declares this as sRGB.
+    albedo: m.albedoSrgb,
+    roughness: m.roughness,
+    normalScale: m.normalScale,
+    metallic: m.metallic,
+    detailScale: m.detailScale,
+  };
+});
 
 export const MATERIAL_BY_ID = Object.fromEntries(MATERIALS.map((m) => [m.id, m]));
 
@@ -45,10 +34,10 @@ export const MATERIAL_LINEAR = Object.fromEntries(
   MATERIALS.map((m) => [m.id, srgbToLinear(m.albedo)])
 );
 
-// Fallback when every weight is zero. This is an explicit, documented default
-// ("neutral basalt") so the result can never be an undefined/black color.
-export const FALLBACK_MATERIAL_ID = "rock";
-export const FALLBACK_WEIGHT_FRACTION = 1.0;
+// Fallback when every weight is zero. Resolved from the pack's declared fusion
+// contract ("neutral basalt") so the result can never be undefined/black.
+export const FALLBACK_MATERIAL_ID = DEFAULT_MATERIAL_PACK_V2.contract.fallback.materialId;
+export const FALLBACK_WEIGHT_FRACTION = DEFAULT_MATERIAL_PACK_V2.contract.fallback.weight;
 
 export function materialIndex(id) {
   return MATERIAL_IDS.indexOf(id);

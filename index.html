@@ -24,6 +24,8 @@
       <button id="btn-load" class="btn" type="button">载入参数</button>
       <input id="file-input" type="file" accept="application/json,.json" hidden />
       <button id="btn-baseline" class="btn btn-ghost" type="button">导出截图</button>
+      <button id="btn-rerun-fusion" class="btn btn-primary" type="button">重新执行地形融合</button>
+      <button id="btn-migrate-legacy" class="btn btn-ghost" type="button">迁移旧版工程(v3→v2)</button>
     </div>
   </header>
 
@@ -41,7 +43,7 @@
           <button id="btn-copy-state" class="btn btn-small" type="button">复制参数 JSON</button>
           <button id="btn-paste-state" class="btn btn-small" type="button">从剪贴板载入</button>
         </div>
-        <p class="hint" id="persist-note">参数自动保存到 localStorage（v3），也可导出 JSON 文件。</p>
+        <p class="hint" id="persist-note">参数自动保存到 localStorage（v4，材质资产 v2），旧版 v1–v3 工程载入时自动迁移，也可导出 JSON 文件。</p>
       </div>
     </aside>
 
@@ -120,6 +122,23 @@
       <div class="swatch-strip" aria-hidden="true">
         <div class="swatch-main" id="swatch-main"></div>
         <div class="swatch-caption">预览色块由最终线性反照率编码为 sRGB 显示（非渲染替代）</div>
+      </div>
+
+      <div class="asset-block">
+        <h3>材质资产版本与迁移</h3>
+        <div class="summary-row">
+          <span>资产版本 / 融合契约</span>
+          <span id="asset-version" class="mono">–</span>
+        </div>
+        <div class="summary-row">
+          <span>构建锁校验</span>
+          <span id="asset-lock" class="mono">–</span>
+        </div>
+        <div class="summary-row">
+          <span>融合执行</span>
+          <span id="asset-fusion-runs" class="mono">–</span>
+        </div>
+        <div id="asset-journal" class="journal-list" aria-label="材质迁移记录"></div>
       </div>
 
       <div class="memory-block">

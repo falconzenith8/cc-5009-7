@@ -2,8 +2,11 @@
 //
 // Design notes:
 //  * Weights are recomputed per-fragment from the interpolated geometric normal
-//    and world height, using the same formulas as src/kernel/terrain.js. This
-//    keeps detailed slope/altitude bands independent of mesh density.
+//    and world height, using the SAME fusion contract as src/kernel/terrain.js.
+//    The raw-weight coefficients are not literals in this shader: they arrive
+//    via uFusionCoeffs[0..3] / uFusionScalar, populated from the declared v2
+//    material pack (glslFusionContract below). The legacy v1 shader carried a
+//    divergent set of constants; v2 forbids that drift.
 //  * Triplanar mapping uses WORLD-space coordinates (metres -> tiles), so
 //    textures are anchored to world space: moving the camera or changing mesh
 //    subdivision never slides the pattern.
@@ -15,6 +18,32 @@
 //    GL_REPEAT + mipmaps + anisotropy; triplanar projection weights fade
 //    smoothly across the 45-degree seams. The optional planar XZ mode is
 //    intentionally kept as an A/B reference and visibly stretches on walls.
+
+import { FUSION_CONTRACT_V2, MATERIAL_IDS_V2 } from "../kernel/materialPack.js";
+
+// Uniform layout consumed by FRAGMENT_SRC. The renderer uploads exactly these
+// values from the v2 pack; tests assert the emitted values equal
+// FUSION_CONTRACT_V2.coefficients, which is how "CPU and GPU share one
+// contract" is enforced rather than assumed.
+//
+// uFusionCoeffs:
+//   [0] = baseRock, slopeRock, highRock, midRock
+//   [1] = baseSoil, soilFlat, lowSoil, midSoil
+//   [2] = soilGain, baseVeg, midVeg, lowVeg
+//   [3] = vegGain, manualGain, vegSlopeTransition, weightEpsilon
+export function glslFusionContract(packContract = FUSION_CONTRACT_V2) {
+  const c = packContract.coefficients;
+  return {
+    coeffs: [
+      [c.baseRock, c.slopeRock, c.highRock, c.midRock],
+      [c.baseSoil, c.soilFlat, c.lowSoil, c.midSoil],
+      [c.soilGain, c.baseVeg, c.midVeg, c.lowVeg],
+      [c.vegGain, packContract.manualGain, packContract.vegetationSlopeTransition, packContract.weightEpsilon],
+    ],
+    fallbackMaterialId: packContract.fallback.materialId,
+    materialOrder: MATERIAL_IDS_V2,
+  };
+}
 
 export const VERTEX_SRC = `#version 300 es
 precision highp float;
@@ -55,6 +84,10 @@ uniform float uVegSlopeLimit;
 uniform vec3 uManual;
 uniform vec4 uZeroPatch;       // enabled, u, v, radius
 
+// Declared v2 fusion contract (see glslFusionContract). No raw-weight
+// coefficients are hard-coded in this shader.
+uniform vec4 uFusionCoeffs[4];
+
 uniform int uMapMode;          // 0 triplanar, 1 planar XZ, 2 mesh UV
 uniform float uTileScale;      // 1 / metersPerTile
 uniform float uSharpness;
@@ -88,7 +121,9 @@ vec2 worldToUV(vec3 p) {
   return p.xz / uWorldSize + 0.5;
 }
 
-// Must match evaluateRawWeights / zeroWeightPatch / normalizeWeights.
+// Must match evaluateRawWeights / zeroWeightPatch / normalizeWeights in
+// terrain.js. The coefficients come from the declared v2 fusion contract via
+// uFusionCoeffs (glslFusionContract), never from shader-local literals.
 vec3 computeWeights(vec3 n, float height, out float slope, out float alt, out bool fallback) {
   slope = saturate(1.0 - n.y);
   alt = saturate(height / max(uMaxHeight, 1.0));
@@ -102,14 +137,19 @@ vec3 computeWeights(vec3 n, float height, out float slope, out float alt, out bo
   float bandSum = aLow + aMid + aHigh;
   vec3 bands = bandSum > 1e-8 ? vec3(aLow, aMid, aHigh) / bandSum : vec3(0.0);
 
-  float vegSlope = 1.0 - smoothstep(uVegSlopeLimit, uVegSlopeLimit + 0.18, slope);
+  float vegSlope = 1.0 - smoothstep(uVegSlopeLimit, uVegSlopeLimit + uFusionCoeffs[3].z, slope);
 
-  float rock = 0.06 + slopeTerm * 1.25 + bands.z * 0.95 + bands.y * 0.10;
-  float soil = 0.05 + flatTerm * (0.30 + bands.x * 1.05 + bands.y * 0.50) * 1.10;
-  float veg  = 0.04 + flatTerm * vegSlope * (bands.y * 0.95 + bands.x * 0.55) * 1.20;
-  rock += uManual.x * 3.2;
-  soil += uManual.y * 3.2;
-  veg  += uManual.z * 3.2;
+  vec4 k0 = uFusionCoeffs[0]; // baseRock, slopeRock, highRock, midRock
+  vec4 k1 = uFusionCoeffs[1]; // baseSoil, soilFlat, lowSoil, midSoil
+  vec4 k2 = uFusionCoeffs[2]; // soilGain, baseVeg, midVeg, lowVeg
+  vec4 k3 = uFusionCoeffs[3]; // vegGain, manualGain, vegTransition, epsilon
+
+  float rock = k0.x + slopeTerm * k0.y + bands.z * k0.z + bands.y * k0.w;
+  float soil = k1.x + flatTerm * (k1.y + bands.x * k1.z + bands.y * k1.w) * k2.x;
+  float veg  = k2.y + flatTerm * vegSlope * (bands.y * k2.z + bands.x * k2.w) * k3.x;
+  rock += uManual.x * k3.y;
+  soil += uManual.y * k3.y;
+  veg  += uManual.z * k3.y;
 
   if (uZeroPatch.x > 0.5) {
     vec2 uv = worldToUV(vWorld);
@@ -119,7 +159,7 @@ vec3 computeWeights(vec3 n, float height, out float slope, out float alt, out bo
   }
 
   float sum = rock + soil + veg;
-  fallback = !(sum > 1e-8);
+  fallback = !(sum > k3.w);
   return fallback ? vec3(1.0, 0.0, 0.0) : vec3(rock, soil, veg) / sum;
 }
 
@@ -297,12 +337,25 @@ void main() {
     vec2 edge = min(f, 1.0 - f);
     float line = 1.0 - smoothstep(0.0, 0.012, min(edge.x, edge.y));
     color = mix(color, vec3(1.0, 0.55, 0.1), line * 0.85);
+  } else if (uDebugMode == 10) {
+    // Vertex-flag readback: 0 surface (black), 1 zero-weight fallback (red),
+    // 2 skirt/base geometry (blue). Lets tests separate real surface texels
+    // from skirt/fallback geometry when correlating fusion weights.
+    color = vec3(clamp(vFlag, 0.0, 2.0) * 0.5, 0.0, vFlag > 1.5 ? 1.0 : 0.0);
   }
 
   if (any(isnan(color)) || any(isinf(color))) color = uFallbackLinear;
   color = clamp(color, 0.0, 1.0);
-  vec3 srgb = mix(color * 12.92, 1.055 * pow(max(color, vec3(0.0)), vec3(1.0 / 2.4)) - 0.055, step(vec3(0.0031308), color));
-  outColor = vec4(srgb, 1.0);
+  // Diagnostic views (weights/normal/slope/altitude/...) encode raw linear data
+  // that tests read back numerically; they must bypass the display transfer so
+  // an on-screen R value equals the actual fusion weight. Only the lit final
+  // view and chunk overlays are encoded to sRGB for display.
+  if ((uDebugMode >= 1 && uDebugMode <= 8) || uDebugMode == 10) {
+    outColor = vec4(color, 1.0);
+  } else {
+    vec3 srgb = mix(color * 12.92, 1.055 * pow(max(color, vec3(0.0)), vec3(1.0 / 2.4)) - 0.055, step(vec3(0.0031308), color));
+    outColor = vec4(srgb, 1.0);
+  }
 }
 `;
 

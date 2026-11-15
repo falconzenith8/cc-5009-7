@@ -6,6 +6,7 @@ import {
   PRESETS,
   DEBUG_MODES_EXPORT,
   STORAGE_KEY,
+  LEGACY_STORAGE_KEYS,
   createDefaultState,
   applyStatePatch,
   applyPreset,
@@ -25,12 +26,21 @@ import {
   normalizeHeightParams,
 } from "../kernel/terrain.js";
 import { MATERIAL_IDS, MATERIAL_BY_ID } from "../kernel/materials.js";
+import {
+  DEFAULT_MATERIAL_PACK_V2,
+  PACK_ASSET_VERSION,
+} from "../kernel/materialPack.js";
+import { verifyPackAgainstLock } from "../kernel/assetLock.js";
+import { createMigrationJournal, createLocalStorageStore, JOURNAL_EVENT } from "../kernel/migrationJournal.js";
+import { loadMaterialAsset } from "../kernel/materialLoader.js";
 import { linearToSrgb } from "../kernel/math.js";
 import { materialTextureBytes } from "../kernel/textures.js";
 import { mat4Perspective, mat4LookAt, mat4Multiply, transformPoint4 } from "../render/gl.js";
 import { TerrainRenderer } from "../render/renderer.js";
 
 const $ = (sel) => document.querySelector(sel);
+
+const MIGRATION_JOURNAL_KEY = "terrain-fusion-migration-journal-v1";
 
 const app = {
   state: createDefaultState(),
@@ -46,6 +56,10 @@ const app = {
   fps: { frames: 0, last: performance.now(), value: 0 },
   lastFrameMs: 0,
   controlValues: new Map(),
+  materialPack: DEFAULT_MATERIAL_PACK_V2,
+  assetLock: null,
+  migrationJournal: createMigrationJournal(createLocalStorageStore(window.localStorage, MIGRATION_JOURNAL_KEY)),
+  fusionRuns: 0,
 };
 
 function rgbCss(linear) {
@@ -90,27 +104,38 @@ function clearError() {
 // State / rebuild pipeline
 // ---------------------------------------------------------------------------
 
+// Real terrain fusion entry point used by both the render loop and the explicit
+// UI button. It runs the kernel fusion pipeline (height field -> declared
+// contract weights -> normalization -> mesh), uploads the result and records an
+// execution run; it never substitutes fixed/canned fusion data.
+function runTerrainFusion(reason) {
+  if (!app.renderer) return null;
+  app.renderer.ensureTextures(app.state.quality.textureSize);
+  const build = buildTerrainMeshes({
+    segments: app.state.quality.lod,
+    chunks: app.state.quality.chunks,
+    params: app.state.height,
+    rules: app.state.rules,
+  });
+  app.build = build;
+  app.memory = meshMemory(build);
+  app.renderer.uploadMeshes(build);
+  app.fusionRuns++;
+  updateAssetPanel();
+  updateMemoryPanel();
+  updateHud();
+  updateStatus(reason);
+  if (build.fallbackCount > 0) {
+    setStatusNote(`零权重回退顶点 ${build.fallbackCount} 个（已使用默认岩石材质）。`);
+  }
+  return build;
+}
+
 function rebuild(reason) {
   try {
     const t0 = performance.now();
-    if (!app.renderer) return;
-    app.renderer.ensureTextures(app.state.quality.textureSize);
-    const build = buildTerrainMeshes({
-      segments: app.state.quality.lod,
-      chunks: app.state.quality.chunks,
-      params: app.state.height,
-      rules: app.state.rules,
-    });
-    app.build = build;
-    app.memory = meshMemory(build);
-    app.renderer.uploadMeshes(build);
-    app.lastBuildMs = performance.now() - t0;
-    updateMemoryPanel();
-    updateHud();
-    updateStatus(reason);
-    if (build.fallbackCount > 0) {
-      setStatusNote(`零权重回退顶点 ${build.fallbackCount} 个（已使用默认岩石材质）。`);
-    }
+    const build = runTerrainFusion(reason);
+    if (build) app.lastBuildMs = performance.now() - t0;
   } catch (e) {
     showError("地形融合失败", e);
     console.error(e);
@@ -123,6 +148,46 @@ function scheduleRebuild(reason) {
     app.rebuildHandle = null;
     rebuild(reason);
   });
+}
+
+// Verifies the live material pack against the committed build lock. Runs over
+// HTTP like every other asset; a failed fetch or mismatch is surfaced, never
+// silently ignored.
+async function verifyAssetLock() {
+  try {
+    const res = await fetch("/assets/terrain-material.lock.json", { cache: "no-store" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    app.assetLock = await res.json();
+  } catch (e) {
+    app.assetLock = null;
+    renderWarnings([{ code: "asset-lock", message: `材质资产锁读取失败：${e.message}` }]);
+  }
+  updateAssetPanel();
+}
+
+function updateAssetPanel() {
+  const versionEl = $("#asset-version");
+  const lockEl = $("#asset-lock");
+  const runEl = $("#asset-fusion-runs");
+  const journalEl = $("#asset-journal");
+  if (!versionEl) return;
+  versionEl.textContent = `v${app.materialPack.assetVersion} · ${app.materialPack.contract.contractId}`;
+  if (app.assetLock) {
+    const verification = verifyPackAgainstLock(app.materialPack, app.assetLock);
+    lockEl.textContent = verification.ok
+      ? `锁校验通过 · hash ${verification.liveHash} · 归一化 ${app.materialPack.weightBuffer.normalization}`
+      : `锁校验失败：${verification.reasons.join("; ")}`;
+    lockEl.className = verification.ok ? "mono ok" : "mono err";
+  } else {
+    lockEl.textContent = "未读取到资产锁";
+    lockEl.className = "mono err";
+  }
+  runEl.textContent = `融合实际执行 ${app.fusionRuns} 次 · 最近构建 ${app.build ? `${app.build.vertexCount.toLocaleString()} 顶点` : "–"}`;
+  const entries = app.migrationJournal.entries();
+  const recent = entries.slice(-3).reverse();
+  journalEl.innerHTML = recent.length
+    ? recent.map((e) => `<div class="journal-entry">${e.at.slice(11, 19)} · ${e.event} · ${e.status || e.version || ""}</div>`).join("")
+    : '<div class="journal-entry">暂无迁移记录（当前为 v2 资产）</div>';
 }
 
 function resourceKey(state) {
@@ -156,12 +221,39 @@ function persistState() {
 
 function loadStoredState() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    // Prefer the v4 key; fall back to legacy v1-v3 keys and migrate them.
+    let raw = localStorage.getItem(STORAGE_KEY);
+    let legacyKey = null;
+    if (!raw) {
+      for (const key of LEGACY_STORAGE_KEYS) {
+        const candidate = localStorage.getItem(key);
+        if (candidate) {
+          raw = candidate;
+          legacyKey = key;
+          break;
+        }
+      }
+    }
     if (!raw) return null;
     const res = deserializeState(raw);
     if (!res.ok) {
       renderWarnings([{ code: "load", message: `本地参数无法载入：${res.error}` }]);
       return null;
+    }
+    if (res.migrated) {
+      app.migrationJournal.recordMigration(
+        {
+          status: "migrated-with-repairs",
+          sourceVersion: res.sourceVersion,
+          targetVersion: PACK_ASSET_VERSION,
+          ok: true,
+          channelsFilled: [],
+          defaultsConverted: [],
+        },
+        { source: legacyKey || "localStorage" }
+      );
+    } else {
+      app.migrationJournal.recordLoad(PACK_ASSET_VERSION, { source: "localStorage" });
     }
     return res.state;
   } catch (e) {
@@ -659,12 +751,25 @@ function setupButtons() {
     }
     app.state = res.state;
     app.warnings = res.warnings;
+    if (res.migrated) {
+      app.migrationJournal.recordMigration({
+        status: "migrated-with-repairs",
+        sourceVersion: res.sourceVersion,
+        targetVersion: PACK_ASSET_VERSION,
+        ok: true,
+        channelsFilled: [],
+        defaultsConverted: [],
+      }, { source: file.name });
+    } else {
+      app.migrationJournal.recordLoad(PACK_ASSET_VERSION, { source: file.name });
+    }
     renderWarnings();
     syncControls();
     updateDebugSelect();
     updateMappingNote();
+    updateAssetPanel();
     persistState();
-    scheduleRebuild("已载入参数文件");
+    scheduleRebuild("已载入参数文件（含旧版迁移）");
     updateProbe();
     updateHud();
     ev.target.value = "";
@@ -702,6 +807,48 @@ function setupButtons() {
     a.href = url;
     a.download = `terrain-baseline-${app.presetId}.png`;
     a.click();
+  });
+  // Explicit button that drives the real terrain fusion implementation
+  // (kernel weight evaluation + normalization + mesh build + GL upload). It
+  // must not render canned data: the stats come straight from the new build.
+  $("#btn-rerun-fusion")?.addEventListener("click", () => {
+    rebuild("手动重新执行地形融合");
+    app.renderer.render(app.state);
+    updateProbe();
+    updateAssetPanel();
+    setStatusNote(`已重新执行地形融合（第 ${app.fusionRuns} 次真实构建）`);
+  });
+  // One-click demonstration of the legacy-project adaptation path: a v1 payload
+  // is migrated through the loader/lock and then fused by the same pipeline.
+  $("#btn-migrate-legacy")?.addEventListener("click", () => {
+    const legacyPayload = JSON.stringify({
+      app: "terrain-fusion-preview",
+      version: 3,
+      state: { ...app.state, version: 3, assetVersion: undefined },
+    });
+    const res = deserializeState(legacyPayload);
+    if (!res.ok) {
+      renderWarnings([{ code: "migration", message: `旧版迁移演示失败：${res.error}` }]);
+      return;
+    }
+    app.state = res.state;
+    app.warnings = res.warnings;
+    app.migrationJournal.recordMigration({
+      status: "migrated-with-repairs",
+      sourceVersion: 3,
+      targetVersion: PACK_ASSET_VERSION,
+      ok: true,
+      channelsFilled: [],
+      defaultsConverted: [],
+    }, { source: "legacy-demo-button" });
+    renderWarnings();
+    syncControls();
+    updateDebugSelect();
+    updateMappingNote();
+    updateAssetPanel();
+    persistState();
+    scheduleRebuild("旧版工程迁移后重新融合");
+    updateProbe();
   });
 }
 
@@ -765,6 +912,8 @@ async function boot() {
     rebuild("初始构建");
     updateProbe();
     updateHud();
+    updateAssetPanel();
+    verifyAssetLock();
     clearError();
     requestAnimationFrame(frame);
 
@@ -808,6 +957,54 @@ async function boot() {
         commitPatch(patch);
         return { warnings: app.warnings };
       },
+      // Ray-march a screen point back to the terrain height field. Uses the
+      // renderer's exact camera (same focus height as render()), so the picked
+      // UV corresponds to the pixel actually drawn there.
+      pickTerrainAt: (clientX, clientY) => pickTerrain(clientX, clientY),
+      // CPU v2 contract weights for a terrain UV, straight from the kernel.
+      cpuWeightsAt: (u, v) => {
+        const s = evaluateSample(u, v, app.state.height, app.state.rules);
+        return {
+          weights: [s.weights.rock, s.weights.soil, s.weights.vegetation],
+          fallback: Boolean(s.fallback),
+        };
+      },
+      // Weights baked into the actual uploaded mesh vertices (bilinear over the
+      // grid), plus the interpolated mesh normal at the same UV. This is what
+      // the rasterizer interpolates in the fragment shader.
+      meshWeightsAt: (u, v) => {
+        const mesh = app.build?.meshes?.[0];
+        if (!mesh) return null;
+        const seg = app.build.segments;
+        const fx = Math.min(seg - 1, Math.max(0, u * seg));
+        const fz = Math.min(seg - 1, Math.max(0, v * seg));
+        const ix = Math.floor(fx), iz = Math.floor(fz);
+        const tx = fx - ix, tz = fz - iz;
+        const width = seg + 1;
+        const lerp = (a, b, t) => a + (b - a) * t;
+        const sample = (off) => {
+          const i00 = iz * width + ix;
+          const i10 = iz * width + (ix + 1);
+          const i01 = (iz + 1) * width + ix;
+          const i11 = (iz + 1) * width + (ix + 1);
+          return lerp(lerp(mesh.weights[i00 * 4 + off], mesh.weights[i10 * 4 + off], tx),
+                      lerp(mesh.weights[i01 * 4 + off], mesh.weights[i11 * 4 + off], tx), tz);
+        };
+        const sampleN = (comp) => {
+          const i00 = iz * width + ix;
+          const i10 = iz * width + (ix + 1);
+          const i01 = (iz + 1) * width + ix;
+          const i11 = (iz + 1) * width + (ix + 1);
+          return lerp(lerp(mesh.normals[i00 * 3 + comp], mesh.normals[i10 * 3 + comp], tx),
+                      lerp(mesh.normals[i01 * 3 + comp], mesh.normals[i11 * 3 + comp], tx), tz);
+        };
+        const nRaw = [sampleN(0), sampleN(1), sampleN(2)];
+        const nLen = Math.hypot(...nRaw) || 1;
+        return {
+          weights: [sample(0), sample(1), sample(2)],
+          normal: nRaw.map((x) => x / nLen),
+        };
+      },
       probeScreenPoint: (u, v) => {
         // Convert a normalized terrain position to a window point via the
         // current camera, so tests can click an exact probe location.
@@ -815,7 +1012,7 @@ async function boot() {
         const world = [(u - 0.5) * p.worldSize, sampleHeightField(u, v, p), (v - 0.5) * p.worldSize];
         const rect = app.renderer.canvas.getBoundingClientRect();
         const eye = app.renderer.cameraEye(app.state);
-        const target = [app.state.view.targetX, app.state.height.maxHeight * 0.38, app.state.view.targetZ];
+        const target = [app.state.view.targetX, app.renderer._targetHeight(app.state), app.state.view.targetZ];
         const view = mat4LookAt(new Float32Array(16), eye, target, [0, 1, 0]);
         const proj = mat4Perspective(new Float32Array(16), (app.state.view.fov * Math.PI) / 180, rect.width / rect.height, 0.5, 4000);
         const vp = mat4Multiply(new Float32Array(16), proj, view);
@@ -837,6 +1034,43 @@ async function boot() {
       },
       screenshot: () => app.renderer.canvas.toDataURL("image/png"),
       getWarnings: () => app.warnings,
+      // Asset/migration surface used by E2E: exposes the live v2 pack status,
+      // lock verification and the real fusion run counter.
+      getAssetInfo: () => ({
+        assetVersion: app.materialPack.assetVersion,
+        contractId: app.materialPack.contract.contractId,
+        lock: app.assetLock,
+        lockOk: app.assetLock ? verifyPackAgainstLock(app.materialPack, app.assetLock).ok : false,
+        fusionRuns: app.fusionRuns,
+        journal: app.migrationJournal.entries(),
+        normalization: app.materialPack.weightBuffer.normalization,
+      }),
+      runTerrainFusion: () => {
+        const build = runTerrainFusion("测试触发的地形融合");
+        return {
+          vertexCount: build.vertexCount,
+          triangleCount: build.triangleCount,
+          fallbackCount: build.fallbackCount,
+          maxWeightSumError: build.maxWeightSumError,
+          fusionRuns: app.fusionRuns,
+        };
+      },
+      migrateLegacyPayload: (payloadText) => {
+        const res = deserializeState(payloadText);
+        if (res.ok) {
+          app.state = res.state;
+          app.migrationJournal.recordMigration({
+            status: "migrated-with-repairs",
+            sourceVersion: res.sourceVersion,
+            targetVersion: PACK_ASSET_VERSION,
+            ok: true,
+            channelsFilled: [],
+            defaultsConverted: [],
+          }, { source: "e2e" });
+          rebuild("E2E 旧版迁移融合");
+        }
+        return res;
+      },
     };
     document.body.dataset.appReady = "1";
   } catch (e) {

@@ -23,6 +23,7 @@ import {
   normalize3,
 } from "./math.js";
 import { MATERIAL_IDS, MATERIAL_BY_ID, FALLBACK_MATERIAL_ID } from "./materials.js";
+import { FUSION_CONTRACT_V2, DEFAULT_MATERIAL_PACK_V2, WEIGHT_EPSILON } from "./materialPack.js";
 
 export const WEIGHTS_PER_VERTEX = 4; // rock, soil, vegetation, vertex flag
 export const SKIRT_FLAG = 2;
@@ -108,6 +109,7 @@ export const DEBUG_MODES = [
   { id: "slope", label: "坡度 Slope" },
   { id: "altitude", label: "海拔 Altitude" },
   { id: "chunks", label: "分块边界 Chunk bounds" },
+  { id: "vertexFlag", label: "顶点标记 Vertex flag" },
 ];
 
 // ---------------------------------------------------------------------------
@@ -327,17 +329,20 @@ export function evaluateRawWeights(normal, heightMeters, params, rules) {
   const nMid = bandSum > 1e-8 ? aMid / bandSum : 0;
   const nHigh = bandSum > 1e-8 ? aHigh / bandSum : 0;
 
-  const vegSlope = 1 - smoothstep(r.vegetationSlopeLimit, r.vegetationSlopeLimit + 0.18, slope);
+  const vegSlope = 1 - smoothstep(r.vegetationSlopeLimit, r.vegetationSlopeLimit + FUSION_CONTRACT_V2.vegetationSlopeTransition, slope);
 
   // Analytic base weights. Slope drives rock hard; altitude bands modulate soil
   // (valley floors) and bare rock (summits); vegetation only on gentler ground.
-  let rock = 0.05 + slopeTerm * 1.35 + nHigh * 0.75;
-  let soil = 0.10 + flatTerm * (0.45 + nLow * 1.15 + nMid * 0.55) * 1.05;
-  let vegetation = 0.12 + flatTerm * vegSlope * (nMid * 1.25 + nLow * 0.7) * 1.5;
+  // The coefficients are the declared v2 fusion contract; the GLSL shader
+  // consumes the same values (see glslFusionContract in shaders.js).
+  const c = FUSION_CONTRACT_V2.coefficients;
+  let rock = c.baseRock + slopeTerm * c.slopeRock + nHigh * c.highRock + nMid * c.midRock;
+  let soil = c.baseSoil + flatTerm * (c.soilFlat + nLow * c.lowSoil + nMid * c.midSoil) * c.soilGain;
+  let vegetation = c.baseVeg + flatTerm * vegSlope * (nMid * c.midVeg + nLow * c.lowVeg) * c.vegGain;
 
-  rock += r.manual.rock * 3.2;
-  soil += r.manual.soil * 3.2;
-  vegetation += r.manual.vegetation * 3.2;
+  rock += r.manual.rock * FUSION_CONTRACT_V2.manualGain;
+  soil += r.manual.soil * FUSION_CONTRACT_V2.manualGain;
+  vegetation += r.manual.vegetation * FUSION_CONTRACT_V2.manualGain;
 
   return {
     rock,
@@ -354,10 +359,11 @@ export function evaluateRawWeights(normal, heightMeters, params, rules) {
   };
 }
 
-// Normalize weights to sum 1. If the sum is non-finite or <= epsilon, return
-// the documented fallback distribution (rock = 1) plus a flag.
-// This is the ONLY place zero-sum is resolved, so every consumer agrees.
-export function normalizeWeights(rawWeights, fallbackId = FALLBACK_MATERIAL_ID) {
+// Normalize weights to sum 1 under the declared partition-of-unity contract.
+// If the sum is non-finite or <= the pack's epsilon, return the documented
+// fallback distribution (rock = 1) plus a flag. This is the ONLY place
+// zero-sum is resolved, so every consumer agrees.
+export function normalizeWeights(rawWeights, fallbackId = FALLBACK_MATERIAL_ID, epsilon = WEIGHT_EPSILON) {
   const values = {};
   let sum = 0;
   for (const id of MATERIAL_IDS) {
@@ -366,15 +372,15 @@ export function normalizeWeights(rawWeights, fallbackId = FALLBACK_MATERIAL_ID) 
     values[id] = sanitized;
     sum += sanitized;
   }
-  if (!(sum > 1e-8) || !Number.isFinite(sum)) {
+  if (!(sum > epsilon) || !Number.isFinite(sum)) {
     const w = {};
     for (const id of MATERIAL_IDS) w[id] = 0;
-    w[fallbackId] = 1;
-    return { weights: w, sum: 0, normalized: false, fallback: true };
+    w[fallbackId] = DEFAULT_MATERIAL_PACK_V2.contract.fallback.weight;
+    return { weights: w, sum: 0, normalized: false, fallback: true, epsilon };
   }
   const w = {};
   for (const id of MATERIAL_IDS) w[id] = values[id] / sum;
-  return { weights: w, sum, normalized: true, fallback: false };
+  return { weights: w, sum, normalized: true, fallback: false, epsilon };
 }
 
 // Full per-sample evaluation. `u`,`v` normalized [0,1] world coordinates.

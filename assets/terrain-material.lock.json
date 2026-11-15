@@ -1,0 +1,9 @@
+{
+  "lockSchemaVersion": 1,
+  "packId": "terrain-material-pack-default",
+  "assetVersion": 2,
+  "contractId": "terrain-fusion-v2-partition-of-unity",
+  "contentHash": "fddd16c2",
+  "weightNormalization": "partition-of-unity",
+  "generatedAt": "2026-11-15T11:29:08.222Z"
+}

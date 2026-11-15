@@ -1,0 +1,992 @@
+{
+  "assetVersion": 2,
+  "pack": {
+    "assetVersion": 2,
+    "packId": "terrain-material-pack-default",
+    "contract": {
+      "contractId": "terrain-fusion-v2-partition-of-unity",
+      "manualGain": 3.2,
+      "vegetationSlopeTransition": 0.18,
+      "weightEpsilon": 1e-8,
+      "normalization": "partition-of-unity",
+      "fallback": {
+        "materialId": "rock",
+        "weight": 1,
+        "label": "neutral basalt"
+      },
+      "coefficients": {
+        "baseRock": 0.05,
+        "slopeRock": 1.35,
+        "highRock": 0.75,
+        "midRock": 0,
+        "baseSoil": 0.1,
+        "soilFlat": 0.45,
+        "lowSoil": 1.15,
+        "midSoil": 0.55,
+        "soilGain": 1.05,
+        "baseVeg": 0.12,
+        "midVeg": 1.25,
+        "lowVeg": 0.7,
+        "vegGain": 1.5
+      }
+    },
+    "weightBuffer": {
+      "layout": [
+        {
+          "index": 0,
+          "semantic": "fusionWeight",
+          "materialId": "rock"
+        },
+        {
+          "index": 1,
+          "semantic": "fusionWeight",
+          "materialId": "soil"
+        },
+        {
+          "index": 2,
+          "semantic": "fusionWeight",
+          "materialId": "vegetation"
+        },
+        {
+          "index": 3,
+          "semantic": "vertexFlag",
+          "colorSpace": "linear",
+          "enum": {
+            "0": "surface",
+            "1": "zeroWeightFallback",
+            "2": "skirt"
+          }
+        }
+      ],
+      "floatsPerVertex": 4,
+      "normalization": "partition-of-unity",
+      "weightEpsilon": 1e-8
+    },
+    "materials": {
+      "rock": {
+        "id": "rock",
+        "label": "岩石 Rock",
+        "swatch": "#7d7469",
+        "albedoSrgb": [
+          0.48,
+          0.45,
+          0.41
+        ],
+        "albedoLinear": [
+          0.19599417930148813,
+          0.17064493581555268,
+          0.13998489755837562
+        ],
+        "roughness": 0.84,
+        "normalScale": 1.15,
+        "metallic": 0,
+        "detailScale": 1,
+        "textures": {
+          "albedoRoughness": {
+            "kind": "albedoRoughness",
+            "internalFormat": "SRGB8_ALPHA8",
+            "colorSpace": {
+              "rgb": "sRGB",
+              "alpha": "linear"
+            },
+            "channels": [
+              {
+                "name": "R",
+                "semantic": "albedo",
+                "colorSpace": "sRGB"
+              },
+              {
+                "name": "G",
+                "semantic": "albedo",
+                "colorSpace": "sRGB"
+              },
+              {
+                "name": "B",
+                "semantic": "albedo",
+                "colorSpace": "sRGB"
+              },
+              {
+                "name": "A",
+                "semantic": "roughness",
+                "colorSpace": "linear"
+              }
+            ]
+          },
+          "normal": {
+            "kind": "normal",
+            "internalFormat": "RGBA8",
+            "colorSpace": {
+              "rgb": "linear",
+              "alpha": "linear"
+            },
+            "channels": [
+              {
+                "name": "R",
+                "semantic": "tangentNormal",
+                "colorSpace": "linear",
+                "axis": "x"
+              },
+              {
+                "name": "G",
+                "semantic": "tangentNormal",
+                "colorSpace": "linear",
+                "axis": "y"
+              },
+              {
+                "name": "B",
+                "semantic": "tangentNormal",
+                "colorSpace": "linear",
+                "axis": "z"
+              },
+              {
+                "name": "A",
+                "semantic": "height",
+                "colorSpace": "linear"
+              }
+            ]
+          }
+        }
+      },
+      "soil": {
+        "id": "soil",
+        "label": "土壤 Soil",
+        "swatch": "#7a5636",
+        "albedoSrgb": [
+          0.44,
+          0.31,
+          0.2
+        ],
+        "albedoLinear": [
+          0.16264719366814206,
+          0.07828831963873101,
+          0.033104766570885055
+        ],
+        "roughness": 0.96,
+        "normalScale": 0.7,
+        "metallic": 0,
+        "detailScale": 1.35,
+        "textures": {
+          "albedoRoughness": {
+            "kind": "albedoRoughness",
+            "internalFormat": "SRGB8_ALPHA8",
+            "colorSpace": {
+              "rgb": "sRGB",
+              "alpha": "linear"
+            },
+            "channels": [
+              {
+                "name": "R",
+                "semantic": "albedo",
+                "colorSpace": "sRGB"
+              },
+              {
+                "name": "G",
+                "semantic": "albedo",
+                "colorSpace": "sRGB"
+              },
+              {
+                "name": "B",
+                "semantic": "albedo",
+                "colorSpace": "sRGB"
+              },
+              {
+                "name": "A",
+                "semantic": "roughness",
+                "colorSpace": "linear"
+              }
+            ]
+          },
+          "normal": {
+            "kind": "normal",
+            "internalFormat": "RGBA8",
+            "colorSpace": {
+              "rgb": "linear",
+              "alpha": "linear"
+            },
+            "channels": [
+              {
+                "name": "R",
+                "semantic": "tangentNormal",
+                "colorSpace": "linear",
+                "axis": "x"
+              },
+              {
+                "name": "G",
+                "semantic": "tangentNormal",
+                "colorSpace": "linear",
+                "axis": "y"
+              },
+              {
+                "name": "B",
+                "semantic": "tangentNormal",
+                "colorSpace": "linear",
+                "axis": "z"
+              },
+              {
+                "name": "A",
+                "semantic": "height",
+                "colorSpace": "linear"
+              }
+            ]
+          }
+        }
+      },
+      "vegetation": {
+        "id": "vegetation",
+        "label": "植被 Vegetation",
+        "swatch": "#5c7134",
+        "albedoSrgb": [
+          0.29,
+          0.4,
+          0.17
+        ],
+        "albedoLinear": [
+          0.06838485415816624,
+          0.13286832155381798,
+          0.024515013703524748
+        ],
+        "roughness": 0.9,
+        "normalScale": 1.6,
+        "metallic": 0,
+        "detailScale": 0.78,
+        "textures": {
+          "albedoRoughness": {
+            "kind": "albedoRoughness",
+            "internalFormat": "SRGB8_ALPHA8",
+            "colorSpace": {
+              "rgb": "sRGB",
+              "alpha": "linear"
+            },
+            "channels": [
+              {
+                "name": "R",
+                "semantic": "albedo",
+                "colorSpace": "sRGB"
+              },
+              {
+                "name": "G",
+                "semantic": "albedo",
+                "colorSpace": "sRGB"
+              },
+              {
+                "name": "B",
+                "semantic": "albedo",
+                "colorSpace": "sRGB"
+              },
+              {
+                "name": "A",
+                "semantic": "roughness",
+                "colorSpace": "linear"
+              }
+            ]
+          },
+          "normal": {
+            "kind": "normal",
+            "internalFormat": "RGBA8",
+            "colorSpace": {
+              "rgb": "linear",
+              "alpha": "linear"
+            },
+            "channels": [
+              {
+                "name": "R",
+                "semantic": "tangentNormal",
+                "colorSpace": "linear",
+                "axis": "x"
+              },
+              {
+                "name": "G",
+                "semantic": "tangentNormal",
+                "colorSpace": "linear",
+                "axis": "y"
+              },
+              {
+                "name": "B",
+                "semantic": "tangentNormal",
+                "colorSpace": "linear",
+                "axis": "z"
+              },
+              {
+                "name": "A",
+                "semantic": "height",
+                "colorSpace": "linear"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "materialOrder": [
+      "rock",
+      "soil",
+      "vegetation"
+    ]
+  },
+  "lock": {
+    "ok": true,
+    "reasons": [],
+    "liveHash": "fddd16c2"
+  },
+  "report": {
+    "status": "migrated-with-repairs",
+    "sourceVersion": 3,
+    "targetVersion": 2,
+    "channelsFilled": [
+      {
+        "materialId": "rock",
+        "textureKind": "albedoRoughness",
+        "channel": "A",
+        "repair": "roughness-channel-filled"
+      },
+      {
+        "materialId": "soil",
+        "textureKind": "normal",
+        "channel": "R",
+        "repair": "normal-channel-filled"
+      },
+      {
+        "materialId": "soil",
+        "textureKind": "normal",
+        "channel": "G",
+        "repair": "normal-channel-filled"
+      },
+      {
+        "materialId": "soil",
+        "textureKind": "normal",
+        "channel": "B",
+        "repair": "normal-channel-filled"
+      },
+      {
+        "materialId": "soil",
+        "textureKind": "normal",
+        "channel": "A",
+        "repair": "height-channel-filled"
+      },
+      {
+        "materialId": "vegetation",
+        "textureKind": "normal",
+        "channel": "R",
+        "repair": "normal-channel-filled"
+      },
+      {
+        "materialId": "vegetation",
+        "textureKind": "normal",
+        "channel": "G",
+        "repair": "normal-channel-filled"
+      },
+      {
+        "materialId": "vegetation",
+        "textureKind": "normal",
+        "channel": "B",
+        "repair": "normal-channel-filled"
+      }
+    ],
+    "defaultsConverted": [
+      {
+        "path": "fusionContract",
+        "from": "legacy-gpu-shader-v1-divergent",
+        "to": "terrain-fusion-v2-partition-of-unity",
+        "detail": "v1 GPU shader coefficients diverged from the CPU kernel; v2 uses one declared contract for both."
+      },
+      {
+        "path": "rules.zeroWeightPatch",
+        "to": "{enabled:false,...}",
+        "detail": "legacy implicit disabled patch made explicit"
+      },
+      {
+        "path": "rules.manual",
+        "to": "{rock:0,soil:0,vegetation:0}",
+        "detail": "legacy implicit zero manual weights made explicit"
+      }
+    ],
+    "textureEvidence": [
+      {
+        "materialId": "rock",
+        "textureKind": "albedoRoughness",
+        "boundaryEvidence": {
+          "source": {
+            "R": [
+              13,
+              25
+            ],
+            "G": [
+              50,
+              62
+            ],
+            "B": [
+              87,
+              99
+            ]
+          },
+          "migrated": {
+            "R": [
+              13,
+              25
+            ],
+            "G": [
+              50,
+              62
+            ],
+            "B": [
+              87,
+              99
+            ]
+          }
+        }
+      },
+      {
+        "materialId": "rock",
+        "textureKind": "normal",
+        "boundaryEvidence": {
+          "source": {
+            "R": [
+              26,
+              38
+            ],
+            "G": [
+              63,
+              75
+            ],
+            "B": [
+              100,
+              112
+            ],
+            "A": [
+              137,
+              149
+            ]
+          },
+          "migrated": {
+            "R": [
+              26,
+              38
+            ],
+            "G": [
+              63,
+              75
+            ],
+            "B": [
+              100,
+              112
+            ],
+            "A": [
+              137,
+              149
+            ]
+          }
+        }
+      },
+      {
+        "materialId": "soil",
+        "textureKind": "albedoRoughness",
+        "boundaryEvidence": {
+          "source": {
+            "R": [
+              39,
+              51
+            ],
+            "G": [
+              76,
+              88
+            ],
+            "B": [
+              113,
+              125
+            ],
+            "A": [
+              150,
+              162
+            ]
+          },
+          "migrated": {
+            "R": [
+              39,
+              51
+            ],
+            "G": [
+              76,
+              88
+            ],
+            "B": [
+              113,
+              125
+            ],
+            "A": [
+              150,
+              162
+            ]
+          }
+        }
+      },
+      {
+        "materialId": "soil",
+        "textureKind": "normal",
+        "boundaryEvidence": {
+          "source": {},
+          "migrated": {}
+        }
+      },
+      {
+        "materialId": "vegetation",
+        "textureKind": "albedoRoughness",
+        "boundaryEvidence": {
+          "source": {
+            "R": [
+              52,
+              64
+            ],
+            "G": [
+              89,
+              101
+            ],
+            "B": [
+              126,
+              138
+            ],
+            "A": [
+              163,
+              175
+            ]
+          },
+          "migrated": {
+            "R": [
+              52,
+              64
+            ],
+            "G": [
+              89,
+              101
+            ],
+            "B": [
+              126,
+              138
+            ],
+            "A": [
+              163,
+              175
+            ]
+          }
+        }
+      },
+      {
+        "materialId": "vegetation",
+        "textureKind": "normal",
+        "boundaryEvidence": {
+          "source": {
+            "A": [
+              176,
+              188
+            ]
+          },
+          "migrated": {
+            "A": [
+              176,
+              188
+            ]
+          }
+        }
+      }
+    ],
+    "warnings": [
+      "material rock record missing; using built-in v1 palette values",
+      "material soil record missing; using built-in v1 palette values",
+      "material vegetation record missing; using built-in v1 palette values",
+      "legacy soil/normal texture missing; all four channels filled from declared v2 defaults"
+    ],
+    "ok": true,
+    "semanticPreservation": {
+      "points": [
+        {
+          "label": "mid-slope",
+          "u": 0.5,
+          "v": 0.5,
+          "slope": 0.6891644384279552,
+          "legacyWeights": {
+            "rock": 0.7019610940443488,
+            "soil": 0.18159526841987397,
+            "vegetation": 0.11644363753577719
+          },
+          "v2Weights": {
+            "rock": 0.593808902901711,
+            "soil": 0.20976343582308152,
+            "vegetation": 0.19642766127520744
+          },
+          "maxWeightDelta": 0.10815219114263785,
+          "fallback": false
+        },
+        {
+          "label": "flat-valley",
+          "u": 0.3,
+          "v": 0.7,
+          "slope": 0.008666328028156811,
+          "legacyWeights": {
+            "rock": 0.026143790849673196,
+            "soil": 0.6688453159041395,
+            "vegetation": 0.30501089324618735
+          },
+          "v2Weights": {
+            "rock": 0.016666666666666666,
+            "soil": 0.5933333333333334,
+            "vegetation": 0.38999999999999996
+          },
+          "maxWeightDelta": 0.0849891067538126,
+          "fallback": false
+        },
+        {
+          "label": "cliff-band",
+          "u": 0.74,
+          "v": 0.5,
+          "slope": 0.7316523293994837,
+          "legacyWeights": {
+            "rock": 0.9413095002261335,
+            "soil": 0.04079488007017514,
+            "vegetation": 0.017895619703691353
+          },
+          "v2Weights": {
+            "rock": 0.8765894356017832,
+            "soil": 0.07032467851332135,
+            "vegetation": 0.053085885884895545
+          },
+          "maxWeightDelta": 0.06472006462435032,
+          "fallback": false
+        },
+        {
+          "label": "steep-face",
+          "u": 0.68,
+          "v": 0.45,
+          "slope": 0.5461564956973876,
+          "legacyWeights": {
+            "rock": 0.7921875611122473,
+            "soil": 0.18352314871989844,
+            "vegetation": 0.024289290167854246
+          },
+          "v2Weights": {
+            "rock": 0.6580086931043287,
+            "soil": 0.2713740092731908,
+            "vegetation": 0.07061729762248058
+          },
+          "maxWeightDelta": 0.13417886800791856,
+          "fallback": false
+        },
+        {
+          "label": "outer-slope",
+          "u": 0.15,
+          "v": 0.85,
+          "slope": 0.04256762114402568,
+          "legacyWeights": {
+            "rock": 0.39393281425165183,
+            "soil": 0.3364577721305311,
+            "vegetation": 0.26960941361781704
+          },
+          "v2Weights": {
+            "rock": 0.24166640997226566,
+            "soil": 0.3702084161219073,
+            "vegetation": 0.38812517390582707
+          },
+          "maxWeightDelta": 0.15226640427938617,
+          "fallback": false
+        }
+      ],
+      "steepPointCount": 3,
+      "steepLabels": [
+        "mid-slope",
+        "cliff-band",
+        "steep-face"
+      ],
+      "weightDeltaMean": 0.1088613269616211,
+      "weightDeltaMax": 0.15226640427938617,
+      "boundaryPixels": [
+        {
+          "materialId": "rock",
+          "textureKind": "albedoRoughness",
+          "identical": true,
+          "evidence": {
+            "source": {
+              "R": [
+                13,
+                25
+              ],
+              "G": [
+                50,
+                62
+              ],
+              "B": [
+                87,
+                99
+              ]
+            },
+            "migrated": {
+              "R": [
+                13,
+                25
+              ],
+              "G": [
+                50,
+                62
+              ],
+              "B": [
+                87,
+                99
+              ]
+            }
+          }
+        },
+        {
+          "materialId": "rock",
+          "textureKind": "normal",
+          "identical": true,
+          "evidence": {
+            "source": {
+              "R": [
+                26,
+                38
+              ],
+              "G": [
+                63,
+                75
+              ],
+              "B": [
+                100,
+                112
+              ],
+              "A": [
+                137,
+                149
+              ]
+            },
+            "migrated": {
+              "R": [
+                26,
+                38
+              ],
+              "G": [
+                63,
+                75
+              ],
+              "B": [
+                100,
+                112
+              ],
+              "A": [
+                137,
+                149
+              ]
+            }
+          }
+        },
+        {
+          "materialId": "soil",
+          "textureKind": "albedoRoughness",
+          "identical": true,
+          "evidence": {
+            "source": {
+              "R": [
+                39,
+                51
+              ],
+              "G": [
+                76,
+                88
+              ],
+              "B": [
+                113,
+                125
+              ],
+              "A": [
+                150,
+                162
+              ]
+            },
+            "migrated": {
+              "R": [
+                39,
+                51
+              ],
+              "G": [
+                76,
+                88
+              ],
+              "B": [
+                113,
+                125
+              ],
+              "A": [
+                150,
+                162
+              ]
+            }
+          }
+        },
+        {
+          "materialId": "soil",
+          "textureKind": "normal",
+          "identical": true,
+          "evidence": {
+            "source": {},
+            "migrated": {}
+          }
+        },
+        {
+          "materialId": "vegetation",
+          "textureKind": "albedoRoughness",
+          "identical": true,
+          "evidence": {
+            "source": {
+              "R": [
+                52,
+                64
+              ],
+              "G": [
+                89,
+                101
+              ],
+              "B": [
+                126,
+                138
+              ],
+              "A": [
+                163,
+                175
+              ]
+            },
+            "migrated": {
+              "R": [
+                52,
+                64
+              ],
+              "G": [
+                89,
+                101
+              ],
+              "B": [
+                126,
+                138
+              ],
+              "A": [
+                163,
+                175
+              ]
+            }
+          }
+        },
+        {
+          "materialId": "vegetation",
+          "textureKind": "normal",
+          "identical": true,
+          "evidence": {
+            "source": {
+              "A": [
+                176,
+                188
+              ]
+            },
+            "migrated": {
+              "A": [
+                176,
+                188
+              ]
+            }
+          }
+        }
+      ],
+      "allBoundariesIdentical": true
+    }
+  },
+  "journal": [
+    {
+      "at": "2026-11-15T12:57:05.329Z",
+      "seq": 1,
+      "event": "migrated",
+      "fromVersion": 3,
+      "toVersion": 2,
+      "status": "migrated-with-repairs",
+      "ok": true,
+      "channelsFilled": 8,
+      "defaultsConverted": 3,
+      "weightDeltaMax": 0.15226640427938617,
+      "boundariesIdentical": true,
+      "source": "cli",
+      "input": "tests/fixtures/legacy-v1-asset.json"
+    },
+    {
+      "at": "2026-11-15T12:57:05.329Z",
+      "seq": 2,
+      "event": "channel-repair",
+      "materialId": "rock",
+      "textureKind": "albedoRoughness",
+      "channel": "A",
+      "repair": "roughness-channel-filled",
+      "migrationSeq": 1
+    },
+    {
+      "at": "2026-11-15T12:57:05.329Z",
+      "seq": 3,
+      "event": "channel-repair",
+      "materialId": "soil",
+      "textureKind": "normal",
+      "channel": "R",
+      "repair": "normal-channel-filled",
+      "migrationSeq": 1
+    },
+    {
+      "at": "2026-11-15T12:57:05.329Z",
+      "seq": 4,
+      "event": "channel-repair",
+      "materialId": "soil",
+      "textureKind": "normal",
+      "channel": "G",
+      "repair": "normal-channel-filled",
+      "migrationSeq": 1
+    },
+    {
+      "at": "2026-11-15T12:57:05.329Z",
+      "seq": 5,
+      "event": "channel-repair",
+      "materialId": "soil",
+      "textureKind": "normal",
+      "channel": "B",
+      "repair": "normal-channel-filled",
+      "migrationSeq": 1
+    },
+    {
+      "at": "2026-11-15T12:57:05.329Z",
+      "seq": 6,
+      "event": "channel-repair",
+      "materialId": "soil",
+      "textureKind": "normal",
+      "channel": "A",
+      "repair": "height-channel-filled",
+      "migrationSeq": 1
+    },
+    {
+      "at": "2026-11-15T12:57:05.329Z",
+      "seq": 7,
+      "event": "channel-repair",
+      "materialId": "vegetation",
+      "textureKind": "normal",
+      "channel": "R",
+      "repair": "normal-channel-filled",
+      "migrationSeq": 1
+    },
+    {
+      "at": "2026-11-15T12:57:05.329Z",
+      "seq": 8,
+      "event": "channel-repair",
+      "materialId": "vegetation",
+      "textureKind": "normal",
+      "channel": "G",
+      "repair": "normal-channel-filled",
+      "migrationSeq": 1
+    },
+    {
+      "at": "2026-11-15T12:57:05.329Z",
+      "seq": 9,
+      "event": "channel-repair",
+      "materialId": "vegetation",
+      "textureKind": "normal",
+      "channel": "B",
+      "repair": "normal-channel-filled",
+      "migrationSeq": 1
+    }
+  ]
+}

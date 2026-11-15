@@ -1,8 +1,10 @@
 // Procedural material texture generation.
 //
-// Two 512^2 RGBA8 textures per material:
-//   * albedo+roughness: RGB = sRGB albedo, A = linear roughness
-//   * normal:           RGB = tangent-space normal (encoded 0..1), A = height
+// Two 512^2 RGBA8 textures per material, matching the v2 pack declarations:
+//   * albedo+roughness: RGB = sRGB albedo (SRGB8_ALPHA8 on upload), A = linear
+//     roughness (channel semantic declared in materialPack.js),
+//   * normal:           RGB = tangent-space normal (encoded 0..1, linear),
+//     A = linear height.
 //
 // All noise fields are periodic on [0,1), so the textures tile seamlessly with
 // GL_REPEAT. Normal maps are built from a height field with wrapped central
@@ -11,6 +13,14 @@
 
 import { fbm, ridgedFbm, valueNoise2, clamp, saturate, normalize3 } from "./math.js";
 import { MATERIAL_BY_ID, MATERIALS, MATERIAL_LINEAR } from "./materials.js";
+import {
+  DEFAULT_MATERIAL_PACK_V2,
+  CHANNEL_ROUGHNESS,
+  CHANNEL_TANGENT_NORMAL,
+  COLOR_SPACE_LINEAR,
+  COLOR_SPACE_SRGB,
+  resolveChannel,
+} from "./materialPack.js";
 
 export const DEFAULT_TEXTURE_SIZE = 512;
 export const TEXTURE_SIZE_OPTIONS = [256, 512, 1024];
@@ -107,9 +117,20 @@ function shadeAlbedo(id, u, v, h, seed) {
 }
 
 // Builds one material's two RGBA8 maps. Returns typed arrays + statistics.
+// The byte layout is validated against the v2 pack's channel declarations, so
+// generated textures cannot silently drift from what the loader/shader expect.
 export function generateMaterialTextures(materialId, size = DEFAULT_TEXTURE_SIZE, seed = 1337) {
   const material = MATERIAL_BY_ID[materialId];
   if (!material) throw new Error(`unknown material: ${materialId}`);
+  // Fail fast if the declared channel semantics do not match this generator.
+  const roughChannel = resolveChannel(DEFAULT_MATERIAL_PACK_V2, materialId, "albedoRoughness", "A");
+  if (roughChannel.semantic !== CHANNEL_ROUGHNESS || roughChannel.colorSpace !== COLOR_SPACE_LINEAR) {
+    throw new Error(`albedo alpha is not declared linear roughness for ${materialId}`);
+  }
+  const normalB = resolveChannel(DEFAULT_MATERIAL_PACK_V2, materialId, "normal", "B");
+  if (normalB.semantic !== CHANNEL_TANGENT_NORMAL || normalB.colorSpace !== COLOR_SPACE_LINEAR) {
+    throw new Error(`normal B is not declared a linear tangent-normal channel for ${materialId}`);
+  }
   const n = Math.max(64, Math.min(2048, Math.floor(size)));
   const height = new Float32Array(n * n);
   for (let y = 0; y < n; y++) {
@@ -209,3 +230,16 @@ export function materialTextureBytes(size) {
 export function decodeNormalTexel(r, g, b) {
   return normalize3([(r / 255) * 2 - 1, (g / 255) * 2 - 1, (b / 255) * 2 - 1]);
 }
+
+// Declared GL internal formats for a material's two maps. The renderer must
+// pick formats from these declarations rather than assuming byte layout.
+export function declaredTextureFormats(materialId) {
+  const m = DEFAULT_MATERIAL_PACK_V2.materials[materialId];
+  if (!m) throw new Error(`unknown material: ${materialId}`);
+  return {
+    albedoRoughness: m.textures.albedoRoughness.internalFormat,
+    normal: m.textures.normal.internalFormat,
+  };
+}
+
+export { COLOR_SPACE_SRGB, COLOR_SPACE_LINEAR };

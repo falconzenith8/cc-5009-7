@@ -252,11 +252,148 @@ async function main() {
       window.__terrainApp.commitPatch({ height: { maxHeight: 210, seed: 2026 }, rules: { manual: { vegetation: 0.6 } } });
       const json = window.__terrainApp.serialize();
       const back = window.__terrainApp.deserialize(json);
-      const ls = localStorage.getItem("terrain-fusion-preview-state-v3");
+      const ls = localStorage.getItem("terrain-fusion-preview-state-v4");
       return { ok: back.ok, height: back.state.height.maxHeight, veg: back.state.rules.manual.vegetation, stored: !!ls && ls.length > 100 };
     });
     check("JSON round-trip preserves parameters", persist.ok && persist.height === 210 && Math.abs(persist.veg - 0.6) < 1e-9, JSON.stringify(persist));
     check("parameters auto-persist to localStorage", persist.stored);
+
+    // --- Material asset v2: lock, declared contract and real fusion runs ----
+    const asset = await page.evaluate(() => window.__terrainApp.getAssetInfo());
+    check("live material pack is explicitly v2", asset.assetVersion === 2, `version ${asset.assetVersion}`);
+    check("fusion contract is the declared v2 partition-of-unity",
+      asset.contractId === "terrain-fusion-v2-partition-of-unity" && asset.normalization === "partition-of-unity",
+      asset.contractId);
+    check("build lock verifies against the live pack", asset.lockOk === true && !!asset.lock,
+      asset.lock ? `hash ${asset.lock.contentHash}` : "no lock");
+    const beforeRuns = asset.fusionRuns;
+    const fusionResult = await page.evaluate(() => window.__terrainApp.runTerrainFusion());
+    check("fusion button runs the real kernel pipeline (not canned data)",
+      fusionResult.fusionRuns === beforeRuns + 1 && fusionResult.vertexCount > 0 && fusionResult.triangleCount > 0,
+      JSON.stringify({ beforeRuns, after: fusionResult.fusionRuns, verts: fusionResult.vertexCount }));
+    check("real fusion keeps weights normalized to unity", fusionResult.maxWeightSumError < 1e-6,
+      String(fusionResult.maxWeightSumError));
+
+    // --- Legacy project migration through the actual adaptation path --------
+    const legacy = await page.evaluate(() => {
+      const state = window.__terrainApp.getState();
+      const payload = JSON.stringify({
+        app: "terrain-fusion-preview",
+        version: 3,
+        state: { ...state, version: 3, assetVersion: undefined },
+      });
+      const res = window.__terrainApp.migrateLegacyPayload(payload);
+      const info = window.__terrainApp.getAssetInfo();
+      return {
+        ok: res.ok,
+        migrated: res.migrated,
+        sourceVersion: res.sourceVersion,
+        targetVersion: res.state.assetVersion,
+        warning: res.warnings.map((w) => w.message).join(" | "),
+        journalEvents: info.journal.map((e) => e.event),
+        stillRuns: info.fusionRuns,
+      };
+    });
+    check("legacy v3 project loads via the v2 adaptation path", legacy.ok && legacy.migrated && legacy.targetVersion === 2,
+      JSON.stringify({ ok: legacy.ok, migrated: legacy.migrated, target: legacy.targetVersion }));
+    check("migration leaves a journal record", legacy.journalEvents.includes("migrated"),
+      legacy.journalEvents.join(","));
+    check("migration warning documents repairs and semantic evidence", /材质资产 v2/.test(legacy.warning), legacy.warning.slice(0, 120));
+    check("post-migration fusion actually re-ran", legacy.stillRuns > beforeRuns, `${legacy.stillRuns} > ${beforeRuns}`);
+
+    // --- GPU pixels follow the v2 contract (weights debug view vs CPU) ------
+    // Two frames are captured with the identical camera: a vertex-flag frame
+    // (surface vs zero-weight fallback vs skirt) and the raw weights-RGB frame.
+    // A candidate texel is admitted only when (1) its flag texel is a real
+    // surface vertex (flag 0; skirt walls lie outside the height field so a ray
+    // cannot correlate them, and fallback is a separate documented contract),
+    // (2) the ray-marched UV hits the height field, and (3) the analytic CPU
+    // sample and the weights baked into the actual mesh agree there. The third
+    // gate removes the discretization gap between the analytic height field the
+    // ray marches and the LOD mesh the GPU rasterizes, isolating the fusion
+    // math itself. The weights view writes raw linear floats (debug modes
+    // bypass the sRGB display transfer), so no correction is applied. The
+    // aggregate (mean error + in-tolerance ratio) is asserted rather than a
+    // single fragile texel, since sub-pixel registration can still jitter a
+    // steep-face pixel onto a neighbouring triangle.
+    const fusion = await page.evaluate(() => {
+      const T = window.__terrainApp;
+      const canvas = document.getElementById("viewport");
+      const rect = canvas.getBoundingClientRect();
+      const snapshot = () => {
+        const copy = document.createElement("canvas");
+        copy.width = canvas.width; copy.height = canvas.height;
+        const ctx = copy.getContext("2d");
+        ctx.drawImage(canvas, 0, 0);
+        return ctx;
+      };
+      T.applyPreset("default");
+      T.commitPatch({ quality: { debugMode: "vertexFlag" } });
+      T.renderNow();
+      const flagCtx = snapshot();
+      T.commitPatch({ quality: { debugMode: "weights" } });
+      T.renderNow();
+      const weightCtx = snapshot();
+      const errors = [];
+      const seen = new Set();
+      let scanned = 0, surfaceTexels = 0, domainAgreed = 0;
+      for (let gy = 0.08; gy < 0.95; gy += 0.06) {
+        for (let gx = 0.08; gx < 0.95; gx += 0.06) {
+          scanned++;
+          const nx = gx + ((Math.floor(gy * 1000) % 3) - 1) * 0.012;
+          const ny = gy + ((Math.floor(gx * 1000) % 3) - 1) * 0.012;
+          const localX = nx * rect.width;
+          const localY = ny * rect.height;
+          const sx = Math.max(0, Math.min(canvas.width - 1, Math.floor(nx * canvas.width)));
+          const sy = Math.max(0, Math.min(canvas.height - 1, Math.floor(ny * canvas.height)));
+          const flagPx = flagCtx.getImageData(sx, sy, 1, 1).data;
+          // Flag mode: R = flag * 0.5 (surface 0, fallback 0.5, skirt 1.0),
+          // B = 1 only for skirt. Require a pure surface texel (flag 0).
+          if (!(flagPx[0] < 32 && flagPx[2] < 32)) continue;
+          surfaceTexels++;
+          const px = weightCtx.getImageData(sx, sy, 1, 1).data;
+          if (px[2] > px[0] && px[2] > 60) continue;
+          const hit = T.pickTerrainAt(rect.left + localX, rect.top + localY);
+          if (!hit) continue;
+          const key = `${hit.u.toFixed(3)}/${hit.v.toFixed(3)}`;
+          if (seen.has(key)) continue;
+          const cpu = T.cpuWeightsAt(hit.u, hit.v);
+          if (cpu.fallback) continue;
+          const mesh = T.meshWeightsAt(hit.u, hit.v);
+          const domainErr = Math.max(
+            Math.abs(mesh.weights[0] - cpu.weights[0]),
+            Math.abs(mesh.weights[1] - cpu.weights[1]),
+            Math.abs(mesh.weights[2] - cpu.weights[2]),
+          );
+          if (domainErr >= 0.06) continue;
+          seen.add(key);
+          domainAgreed++;
+          const gpu = [px[0] / 255, px[1] / 255, px[2] / 255];
+          errors.push(Math.max(
+            Math.abs(gpu[0] - cpu.weights[0]),
+            Math.abs(gpu[1] - cpu.weights[1]),
+            Math.abs(gpu[2] - cpu.weights[2]),
+          ));
+        }
+      }
+      const meanErr = errors.reduce((a, b) => a + b, 0) / Math.max(1, errors.length);
+      const withinTolerance = errors.filter((e) => e < 0.12).length;
+      return {
+        scanned, surfaceTexels, domainAgreed,
+        samples: errors.length,
+        meanErr,
+        passRatio: errors.length ? withinTolerance / errors.length : 0,
+      };
+    });
+    check("GPU weights view produced correlated surface texels", fusion.samples >= 12,
+      `${fusion.samples} samples (${fusion.surfaceTexels} surface, ${fusion.domainAgreed} domain-agreed, ${fusion.scanned} scanned)`);
+    check("GPU fusion weights track the CPU v2 contract on average (no legacy constants)",
+      fusion.meanErr < 0.05,
+      `meanErr=${fusion.meanErr.toFixed(4)} over ${fusion.samples} texels`);
+    check("at least 90% of surface texels match the CPU v2 contract within 0.12",
+      fusion.passRatio >= 0.9,
+      `passRatio=${fusion.passRatio.toFixed(3)} (${fusion.samples} texels)`);
+    await page.evaluate(() => window.__terrainApp.commitPatch({ quality: { debugMode: "final" } }));
 
     // --- Texture scale independent of mesh subdivision --------------------
     // In triplanar world-space mapping, changing LOD must not rescale the

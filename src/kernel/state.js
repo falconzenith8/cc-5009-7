@@ -14,9 +14,17 @@ import {
   DEBUG_MODES,
   validateState,
 } from "./terrain.js";
+import { PACK_ASSET_VERSION } from "./materialPack.js";
+import { loadMaterialAsset } from "./materialLoader.js";
 
-export const STATE_VERSION = 3;
-export const STORAGE_KEY = "terrain-fusion-preview-state-v3";
+export const STATE_VERSION = 4;
+export const LEGACY_STATE_VERSIONS = [1, 2, 3];
+export const STORAGE_KEY = "terrain-fusion-preview-state-v4";
+export const LEGACY_STORAGE_KEYS = [
+  "terrain-fusion-preview-state-v3",
+  "terrain-fusion-preview-state-v2",
+  "terrain-fusion-preview-state-v1",
+];
 
 export const CONTROL_GROUPS = [
   {
@@ -200,6 +208,7 @@ export function deepMerge(base, patch) {
 export function createDefaultState() {
   return {
     version: STATE_VERSION,
+    assetVersion: PACK_ASSET_VERSION,
     height: { ...DEFAULT_HEIGHT_PARAMS },
     rules: JSON.parse(JSON.stringify(DEFAULT_MATERIAL_RULES)),
     mapping: { ...DEFAULT_MAPPING },
@@ -234,6 +243,7 @@ export function applyStatePatch(state, patch) {
   return {
     state: {
       version: STATE_VERSION,
+      assetVersion: PACK_ASSET_VERSION,
       height: validated.height,
       rules: validated.rules,
       mapping: validated.mapping,
@@ -261,7 +271,30 @@ export function applyPreset(state, presetId) {
 // edited file cannot smuggle undefined values into the renderer.
 export function serializeState(state) {
   const { state: clean, warnings } = applyStatePatch(createDefaultState(), state);
-  return JSON.stringify({ app: "terrain-fusion-preview", version: STATE_VERSION, state: clean, warnings }, null, 2);
+  return JSON.stringify({ app: "terrain-fusion-preview", version: STATE_VERSION, assetVersion: PACK_ASSET_VERSION, state: clean, warnings }, null, 2);
+}
+
+// Migrates a legacy (v1-v3) or v4 state payload through the material asset
+// loader, so old projects load via the real v2 adaptation path. Returns the
+// migrated state plus an explicit migration report (never a silent success).
+export function migrateLegacyState(payload) {
+  const sourceVersion = Number(payload.version) || 3;
+  const legacyAsset = {
+    assetVersion: sourceVersion >= STATE_VERSION ? PACK_ASSET_VERSION : 1,
+    // v1-v3 projects carry fusion rules/config but no texture byte payloads;
+    // the migrator fills the declared v2 material pack and records defaults.
+    config: { rules: payload.rules, params: payload.height },
+  };
+  const loaded = loadMaterialAsset(legacyAsset, { source: `state-v${sourceVersion}` });
+  return {
+    sourceVersion,
+    migrated: loaded.migrated === true,
+    ok: loaded.ok,
+    report: loaded.report || null,
+    journal: loaded.journal,
+    error: loaded.error || null,
+    rolledBack: loaded.rolledBack === true,
+  };
 }
 
 export function deserializeState(text) {
@@ -275,8 +308,31 @@ export function deserializeState(text) {
   if (!payload || typeof payload !== "object" || !payload.height || !payload.rules) {
     return { ok: false, error: "缺少 height/rules 字段，无法识别为地形融合参数。" };
   }
+  const migrationNotes = [];
+  const incomingVersion = Number(payload.version) || 3;
+  if (incomingVersion < STATE_VERSION) {
+    const migration = migrateLegacyState(payload);
+    if (!migration.ok) {
+      return { ok: false, error: `旧版工程迁移失败: ${migration.error || "未知原因"}` };
+    }
+    if (migration.report) {
+      const r = migration.report;
+      migrationNotes.push(
+        `旧版工程 v${migration.sourceVersion} → 材质资产 v${PACK_ASSET_VERSION}：${r.status}；` +
+          `补全通道 ${r.channelsFilled.length} 处，转换旧默认值 ${r.defaultsConverted.length} 处。`
+      );
+      if (r.semanticPreservation) {
+        migrationNotes.push(
+          `融合语义保留证据：权重最大偏差 ${r.semanticPreservation.weightDeltaMax.toFixed(4)}，` +
+            `边界像素一致 ${r.semanticPreservation.allBoundariesIdentical ? "是" : "否"}。`
+        );
+      }
+    }
+  }
   const { state, warnings } = applyStatePatch(createDefaultState(), payload);
-  return { ok: true, state, warnings };
+  state.version = STATE_VERSION;
+  state.assetVersion = PACK_ASSET_VERSION;
+  return { ok: true, state, warnings: [...migrationNotes.map((m) => ({ code: "asset-migration", message: m })), ...warnings], migrated: incomingVersion < STATE_VERSION, sourceVersion: incomingVersion };
 }
 
 export function buildStateQuerystring(state) {

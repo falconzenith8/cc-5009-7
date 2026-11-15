@@ -212,6 +212,16 @@ select, input[type="number"], input[type="text"] {
 .statusbar .err { color: #ff9aa5; }
 .statusbar .ok { color: var(--ok); }
 
+.asset-block { padding: 10px 14px; border-top: 1px solid var(--line); }
+.asset-block h3 { margin: 0 0 6px; font-size: 12px; letter-spacing: 0.02em; }
+.asset-block .summary-row { margin-bottom: 4px; }
+.asset-block .mono.ok { color: var(--ok); }
+.asset-block .mono.err { color: #ff9aa5; }
+.btn.btn-primary { border-color: var(--accent); color: #eef3fa; background: #243049; }
+.btn.btn-primary:hover { background: #2d3d5e; }
+.journal-list { margin-top: 6px; max-height: 96px; overflow: auto; }
+.journal-entry { font-family: var(--mono); font-size: 10.5px; color: var(--muted); padding: 2px 0; border-bottom: 1px dashed var(--line); }
+
 @media (max-width: 1180px) {
   .layout { grid-template-columns: 280px minmax(0, 1fr) 300px; }
 }
